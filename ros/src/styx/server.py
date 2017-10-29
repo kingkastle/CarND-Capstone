@@ -10,7 +10,7 @@ from bridge import Bridge
 from conf import conf
 
 count = 0
-skip = 3
+skip = 4
 
 ## Uncomment if car not running on Mac
 #eventlet.monkey_patch()
