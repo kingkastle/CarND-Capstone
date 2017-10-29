@@ -19,7 +19,7 @@ For your reference, here is a [Youtube video](https://youtu.be/43MmoNrYGq4) show
 
 ## Architecture Diagram
 
-![System_Arch]https://goo.gl/hSy66q)
+![System_Arch](https://goo.gl/hSy66q)
 
 ### Native Installation
 
