@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 
+PRINT_IMAGES = True
 USE_DNN_CLASSIFIER = False
 
 def load_detection_graph(frozen_graph_filename):
@@ -81,11 +82,19 @@ def get_traffic_light_b_box(image):
     else:
         return None
 
-def draw_bounding_box(image, box, label):
+def draw_bounding_box(image, box, label, decision):
+    color = (255, 0, 0)
+    if decision == 0:
+        color = (0, 0, 255)
+    elif decision == 1:
+        color = (0, 255, 255)
+    elif decision == 2:
+        color = (0, 255, 0)
+
     font = cv2.FONT_HERSHEY_DUPLEX
     x0, x1, y0, y1 = box
-    cv2.rectangle(image, (x0, y0), (x1, y1), (255, 0, 0), 2)    
-    cv2.putText(image, label, (x0 + int((x1 - x0)/2) , y1 + 40), font, 1, (255, 0, 0), 1, cv2.LINE_AA)
+    cv2.rectangle(image, (x0, y0), (x1, y1), color, 2)    
+    cv2.putText(image, label, (x0 + int((x1 - x0)/2) , y1 + 40), font, 1, color, 1, cv2.LINE_AA)
     return image
 
 # Detect traffic light bounding boxes
@@ -108,39 +117,55 @@ def get_classification(image, iterat):
     x0, x1, y0, y1 = tl_b_box
     tl_b_box_image = image[y0:y1,x0:x1]
 
-    path = output_images_path+"/test_"+str(iterat)+".jpg"
+    path = output_images_path+"/box_"+str(iterat)+".jpg"
     cv2.imwrite(path, tl_b_box_image)
 
-    if USE_DNN_CLASSIFIER == True:
-        return dnn_classifier(tl_b_box_image, image, tl_b_box)
-    else:
-        return cv_classifier_2(tl_b_box_image, image, tl_b_box)
+    return cv_classifier(tl_b_box_image, image, tl_b_box, iterat)
 
-def dnn_classifier(image, original_image, box):
+
+def cv_classifier(image, original_image, box, iterat):
     """
-    Source: https://github.com/tokyo-drift/traffic_light_classifier
+    Classifier that uses the brightness (V in HSV) of an image, and determines the proportion of the image height where the maximum brightness occur.
+    If this proportion (normalized mean brightness row index), is on the top of the image, hence it is a red light. 
+    If it is in the middle, hence it is a yellow light.
+    If it is the bottom, then it is a green light.
+
+    Tested with very high accuracy both in simulator and real images.
 
     Args:
         Image: cv2.image in BGR
+
     """
 
-    # Resize image for DNN squeezenet graph
-    resized_image = cv2.resize(image, (32, 32))
-    with classification_session.as_default(), classification_graph.as_default():
-        softmax_prob = list(classification_session.run(tf.nn.softmax(output_graph.eval(feed_dict={input_graph: [resized_image]}))))
-        softmax_ind = softmax_prob.index(max(softmax_prob))
+    decision = 4
 
+    img_h, img_w = image.shape[:2]
 
-    decision = index2msg[softmax_ind]
+    bright_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[:,:,2] 
+    max_bright = bright_img.max()
+    thresh_bright_idx_row, thresh_bright_idx_col = np.where(bright_img >= (max_bright-20))
+    mean_bright_idx_row = thresh_bright_idx_row.mean()
+    norm_mean_bright = mean_bright_idx_row / img_h
+
+    print("Normalized mean index: ", norm_mean_bright)
+
+    if norm_mean_bright < 0.425:
+        decision = 0
+    elif norm_mean_bright >= 0.425 and norm_mean_bright < 0.55:
+        decision = 1
+    else:
+        decision = 2
+
+    if PRINT_IMAGES == True:
+        cv2.imwrite(output_images_path+"/"+'bright_img_'+str(iterat)+'.jpg', bright_img)
 
     label = light2str[decision]
     cat_image = np.copy(original_image)
-    cat_image = draw_bounding_box(cat_image, box, label)
-
+    cat_image = draw_bounding_box(cat_image, box, label, decision)
 
     return decision, cat_image
 
-def cv_classifier_1(image, original_image, box):
+def cv_classifier_2(image, original_image, box):
     """
     Suggested by @bostonbio, autobots team member
 
@@ -170,89 +195,44 @@ def cv_classifier_1(image, original_image, box):
     
     label = light2str[decision]
     cat_image = np.copy(original_image)
-    cat_image = draw_bounding_box(cat_image, box, label)
+    cat_image = draw_bounding_box(cat_image, box, label, decision)
 
 
     return decision, cat_image
 
-def cv_classifier_2(image, original_image, box):
+def dnn_classifier(image, original_image, box):
     """
-    Used in real test by: https://github.com/priya-dwivedi/CarND-Capstone-Carla
+    Source: https://github.com/tokyo-drift/traffic_light_classifier
 
     Args:
         Image: cv2.image in BGR
-
     """
 
-    decision = 4
-
-    brightness = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[:,:,-1] 
-    hs, ws = np.where(brightness >= (brightness.max()-30))
-    hs_mean = hs.mean()
-    img_h = image.shape[0]
-    if hs_mean / img_h < 0.4:
-        decision = 0
-    elif hs_mean / img_h >= 0.55:
-        decision = 2
-    else:
-        decision = 1
-    
-    label = light2str[decision]
-    cat_image = np.copy(original_image)
-    cat_image = draw_bounding_box(cat_image, box, label)
+    # Resize image for DNN squeezenet graph
+    resized_image = cv2.resize(image, (32, 32))
+    with classification_session.as_default(), classification_graph.as_default():
+        softmax_prob = list(classification_session.run(tf.nn.softmax(output_graph.eval(feed_dict={input_graph: [resized_image]}))))
+        softmax_ind = softmax_prob.index(max(softmax_prob))
 
 
-    return decision, cat_image
-
-def cv_classifier_3(image, original_image, box):
-    """
-    Used in simulator by: https://github.com/priya-dwivedi/CarND-Capstone-Carla
-
-    Args:
-        Image: cv2.image in BGR
-
-    """
-
-    decision = 4
-
-    red_img = image[:,:,2]
-    green_img = image[:,:,1]
-    area_thr = 80
-
-    red_area = np.sum(red_img == red_img.max())
-    green_area = np.sum(green_img == green_img.max())
-
-    if red_area >= area_thr and green_area <= area_thr:
-      decision = 0
-    elif red_area >= area_thr and green_area >= area_thr:
-      decision = 1 if 0.8 <= red_area / green_area <= 1.2 else 0
-    elif green_area >= area_thr:
-      decision = 2
-    else:
-      decision = 4
+    decision = index2msg[softmax_ind]
 
     label = light2str[decision]
     cat_image = np.copy(original_image)
-    cat_image = draw_bounding_box(cat_image, box, label)
+    cat_image = draw_bounding_box(cat_image, box, label, decision)
+
 
     return decision, cat_image
-
 
 # Path to models & test images
-
 root_dir = '..'
 detection_model_path = os.path.join(root_dir,'ros', 'src', 'tl_detector', 'light_classification', 'models', 'detection_models', 'ssd_mobilenet', 'frozen_inference_graph.pb')
 classification_model_path = os.path.join(root_dir, 'ros', 'src', 'tl_detector', 'light_classification', 'models', 'classification_models', 'tokyo_drift', 'model_classification.pb') 
 
 # Real images
-green_image_path = [os.path.join('test_real_images', 'green_{}.jpg'.format(i)) for i in range(1, 8)]
-red_image_path = [os.path.join('test_real_images', 'red_{}.jpg'.format(i)) for i in range(1, 5)]
-yellow_image_path = [os.path.join('test_real_images', 'yellow_{}.jpg'.format(i)) for i in range(1, 3)]
-
-# Simulator images
-#green_image_path = [os.path.join('test_sim_images', 'green_{}.jpg'.format(i)) for i in range(1, 5)]
-#red_image_path = [os.path.join('test_sim_images', 'red_{}.jpg'.format(i)) for i in range(1, 3)]
-#yellow_image_path = [os.path.join('test_sim_images', 'yellow_{}.jpg'.format(i)) for i in range(1, 3)]
+green_image_path = [os.path.join('test_images', 'green_{}.jpg'.format(i)) for i in range(1, 12)]
+red_image_path = [os.path.join('test_images', 'red_{}.jpg'.format(i)) for i in range(1, 7)]
+yellow_image_path = [os.path.join('test_images', 'yellow_{}.jpg'.format(i)) for i in range(1, 5)]
 
 light2str = {0: 'red', 1: 'yellow', 2: 'green', 3: 'none', 4: 'unknown'}
 output_images_path = 'pred_images'
@@ -292,6 +272,7 @@ cat_images = []
 correct = 0
 total = 0
 iteration = 0
+
 for img_path in red_image_path:
     img = cv2.imread(img_path)
     cat, cat_img = get_classification(img, iteration)
@@ -300,6 +281,7 @@ for img_path in red_image_path:
         correct = correct + 1
     total = total + 1
     iteration = iteration + 1
+
 
 for img_path in yellow_image_path:
     img = cv2.imread(img_path)
@@ -319,13 +301,15 @@ for img_path in green_image_path:
     total = total + 1
     iteration = iteration + 1
 
+
 # Print results
 print( 'accuracy: ' + str(correct) + "/" + str(total))
 
+iteration = 0
 for i in range(0, len(cat_images)): 
     image = cat_images[i]
     #plt.figure(figsize=(12, 8))
     #plt.imshow(image)
-    path = output_images_path+"/img_"+str(iteration)+".jpg"
+    path = output_images_path+"/pred_"+str(iteration)+".jpg"
     cv2.imwrite(path, image)
     iteration = iteration+1
