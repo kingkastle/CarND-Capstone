@@ -76,6 +76,7 @@ class TLClassifier(object):
         self.detection_classes = self.detection_graph.get_tensor_by_name('detection/detection_classes:0')
 
         ### Classification model ###
+        # Not used, since CV classifier performed better on test images
         # Source: https://github.com/tokyo-drift/traffic_light_classifier
         if USE_DNN_CLASSIFIER == True:
             classification_model_path = os.path.join(rp.get_path('tl_detector'), 'light_classification', 'models', 'classification_models', 'tokyo_drift', 'model_classification.pb')
@@ -98,7 +99,7 @@ class TLClassifier(object):
         pred_classes = pred_classes.squeeze()
         pred_scores = pred_scores.squeeze()
 
-        confidence_thresh = 0.15
+        confidence_thresh = 0.1
         max_confidence = 0
         box_idx = -1
         img_h, img_w = image.shape[:2]
@@ -154,10 +155,48 @@ class TLClassifier(object):
         x0, x1, y0, y1 = tl_b_box
         tl_b_box_image = image[y0:y1,x0:x1]
 
-        if USE_DNN_CLASSIFIER == True:
-            return self.dnn_classifier(tl_b_box_image)
+        # Used CV classifier since it performed better on test images
+        return self.cv_classifier(tl_b_box_image)
+
+    def cv_classifier(self, image):
+        """
+        Classifier that uses the brightness (V in HSV) of an image, and determines the proportion of the image height where the maximum brightness occur.
+        If this proportion (normalized mean brightness row index), is on the top of the image, hence it is a red light. 
+        If it is in the middle, hence it is a yellow light.
+        If it is the bottom, then it is a green light.
+
+        Tested with very high accuracy both in simulator and real images.
+
+        Args:
+            Image: cv2.image in BGR
+
+        """
+
+        decision = TrafficLight.UNKNOWN
+
+        img_h, img_w = image.shape[:2]
+
+        bright_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)[:,:,2] 
+        max_bright = bright_img.max()
+        thresh_bright_idx_row, thresh_bright_idx_col = np.where(bright_img >= (max_bright-20))
+        mean_bright_idx_row = thresh_bright_idx_row.mean()
+        norm_mean_bright = mean_bright_idx_row / img_h
+
+        #print("Normalized mean index: ", norm_mean_bright)
+
+        if norm_mean_bright < 0.425:
+            decision = TrafficLight.RED
+        elif norm_mean_bright >= 0.425 and norm_mean_bright < 0.55:
+            decision = TrafficLight.YELLOW
         else:
-            return self.cv_classifier_3(tl_b_box_image)
+            decision = TrafficLight.GREEN
+
+        if PRINT_IMAGES == True:
+            im_name = "bright_img_"+str(self.iteration)+".jpg"
+            cv2.imwrite(self.output_images_path+"/"+im_name, bright_img)
+
+        return decision
+
 
     def dnn_classifier(self, image):
         """
@@ -183,7 +222,7 @@ class TLClassifier(object):
 
         return decision
 
-    def cv_classifier_1(self, image):
+    def cv_classifier_2(self, image):
         """
         Suggested by @bostonbio, autobots team member
 
@@ -213,61 +252,3 @@ class TLClassifier(object):
 
         return decision
 
-    def cv_classifier_2(self, image):
-        """
-        Used in real test by: https://github.com/priya-dwivedi/CarND-Capstone-Carla
-
-        Args:
-            Image: cv2.image in BGR
-
-        """
-
-        decision = TrafficLight.UNKNOWN
-
-        brightness = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)[:,:,-1]
-        hs, ws = np.where(brightness >= (brightness.max()-30))
-        hs_mean = hs.mean()
-        img_h = image.shape[0]
-        if hs_mean / img_h < 0.4:
-            decision = TrafficLight.RED
-        elif hs_mean / img_h >= 0.55:
-            decision = TrafficLight.GREEN
-        else:
-            decision = TrafficLight.YELLOW
-
-        return decision
-
-    def cv_classifier_3(self, image):
-        """
-        Args:
-            Image: cv2.image in BGR
-
-        """
-
-        red_img = image[:,:,2]
-        green_img = image[:,:,1]
-
-        if PRINT_IMAGES == True:
-            cv2.imwrite(self.output_images_path+"/"+'red_img.jpg', red_img)
-            cv2.imwrite(self.output_images_path+"/"+'green_img.jpg', green_img)
-
-        # counts pixels which are max in each picture color:
-        red_area = np.sum(red_img == red_img.max())
-        green_area = np.sum(green_img == green_img.max())
-
-        if red_area - green_area >= 15:
-            decision = TrafficLight.RED
-            # rospy.loginfo("RED {0} {1}".format(red_area, green_area))
-        elif green_area - red_area >= 15:
-            decision = TrafficLight.GREEN
-            # rospy.loginfo("GREEN {0} {1}".format(red_area, green_area))
-        else:
-            decision = TrafficLight.UNKNOWN
-            # print("UNKNOWN",red_area, green_area)
-
-        # if PRINT_IMAGES == True:
-        #     im_name_3 = str(self.light2str[decision])+"_"+str(self.iteration)+".jpg"
-        #     cv2.imwrite(self.output_images_path+"/"+im_name_3, image)
-        #     self.iteration = self.iteration+1
-
-        return decision
