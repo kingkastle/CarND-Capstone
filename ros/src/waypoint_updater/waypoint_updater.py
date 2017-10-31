@@ -46,7 +46,7 @@ class WaypointUpdater(object):
         self.sampling_rate = 10.
         self.car_pose = None
         self.car_orientation = None
-        self.waypoints = []
+        self.waypoints = None
         self.closest_waypoint = None
         self.redlight_wp = -1
         self.max_speed = rospy.get_param('waypoint_loader/velocity')*5/18.
